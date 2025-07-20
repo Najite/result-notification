@@ -3,16 +3,16 @@
   "routes": [
     {
       "src": "/api/notify-results",
-      "dest": "/api/notify-results.js"
+      "dest": "/server/api/notify-results.js"
     },
     
     {
       "src": "/api/test-sms",
-      "dest": "/api/test-sms.js"
+      "dest": "/server/api/test-sms.js"
     },
     {
       "src": "/api/health",
-      "dest": "/api/health.js"
+      "dest": "/server/api/health.js"
     },
     {
       "handle": "filesystem"
