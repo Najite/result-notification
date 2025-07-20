@@ -1,11 +1,20 @@
 {
   "version": 2,
+  "builds": [
+    {
+      "src": "server/api/*.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "public/**/*",
+      "use": "@vercel/static"
+    }
+  ],
   "routes": [
     {
       "src": "/api/notify-results",
       "dest": "/server/api/notify-results.js"
     },
-    
     {
       "src": "/api/test-sms",
       "dest": "/server/api/test-sms.js"
@@ -19,7 +28,12 @@
     },
     {
       "src": "/(.*)",
-      "dest": "/index.html"
+      "dest": "/public/$1"
     }
-  ]
+  ],
+  "functions": {
+    "server/api/*.js": {
+      "runtime": "nodejs20.x"
+    }
+  }
 }
