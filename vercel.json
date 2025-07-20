@@ -1,14 +1,8 @@
 {
   "version": 2,
-  "functions": {
-    "api/*.js": {
-      "runtime": "nodejs20.x"
-    }
-  },
- 
   "routes": [
     {
-      "src": "/api/notify-result",
+      "src": "/api/notify-results",
       "dest": "/api/notify-results.js"
     },
     
