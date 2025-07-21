@@ -42,7 +42,7 @@ interface StudentResult {
 
 export class NotificationService {
   private static readonly SMS_SERVICE_URL = process.env.NODE_ENV === 'production' 
-    ? 'https://naija-result-connect.vercel.app' 
+    ? 'https://result-notification-three.vercel.app/' 
     : 'http://localhost:3001';
 
   // Initialize EmailJS (call this once in your app)
