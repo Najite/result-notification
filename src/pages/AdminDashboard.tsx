@@ -348,7 +348,7 @@ const AdminDashboard: React.FC = () => {
             <TabsTrigger value="students">Students</TabsTrigger>
             <TabsTrigger value="courses">Courses</TabsTrigger>
             <TabsTrigger value="results">Results</TabsTrigger>
-            <TabsTrigger value="notifications">Notifications</TabsTrigger>
+            {/* <TabsTrigger value="notifications">Notifications</TabsTrigger> */}
             <TabsTrigger value="feedback">Feedback</TabsTrigger>
           </TabsList>
 
@@ -625,7 +625,7 @@ const AdminDashboard: React.FC = () => {
             />
           </TabsContent>
 
-          <TabsContent value="notifications" className="space-y-6">
+          {/* <TabsContent value="notifications" className="space-y-6">
             <NotificationCenter
               students={students}
               onPublishResults={handlePublishResults}
@@ -637,7 +637,7 @@ const AdminDashboard: React.FC = () => {
               departments={departments}
               levels={levels}
             />
-          </TabsContent>
+          </TabsContent> */}
 
           <TabsContent value="feedback" className="space-y-6">
             <FeedbackTab />
