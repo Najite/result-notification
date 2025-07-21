@@ -1,8 +1,35 @@
-// {
-//   "rewrites": [
-//     {
-//       "source": "/(.*)",
-//       "destination": "/index.html"
-//     }
-//   ]
-// }
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "server/api/**/*.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "*.html",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/notify-results",
+      "dest": "/server/api/notify-results.js"
+    },
+    {
+      "src": "/api/test-sms",
+      "dest": "/server/api/test-sms.js"
+    },
+    {
+      "src": "/api/health",
+      "dest": "/server/api/health.js"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/public/$1"
+    }
+  ]
+  
+}

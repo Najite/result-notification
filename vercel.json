@@ -2,12 +2,15 @@
   "version": 2,
   "builds": [
     {
-      "src": "server/api/**/*.js",
-      "use": "@vercel/node"
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
     },
     {
-      "src": "*.html",
-      "use": "@vercel/static"
+      "src": "server/api/*.js",
+      "use": "@vercel/node"
     }
   ],
   "routes": [
@@ -24,12 +27,8 @@
       "dest": "/server/api/health.js"
     },
     {
-      "handle": "filesystem"
-    },
-    {
       "src": "/(.*)",
-      "dest": "/public/$1"
+      "dest": "/$1"
     }
   ]
-  
 }
