@@ -187,7 +187,7 @@ ${resultDetails}
 
 Summary: ${summary.totalCourses} courses, ${summary.totalUnits} units, GPA: ${summary.gpa}
 
-Moshood Abiola Polytechnic`;
+Moshood Abiola Polytechnic `;
 
         const smsResult = await sendSMS(phoneNumber, smsMessage);
 

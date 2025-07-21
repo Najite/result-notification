@@ -41,9 +41,9 @@ interface StudentResult {
 }
 
 export class NotificationService {
-  private static readonly SMS_SERVICE_URL = typeof window !== 'undefined' && window.location.hostname === 'localhost'
-    ? 'http://localhost:3001'
-    : '';
+  private static readonly SMS_SERVICE_URL = process.env.NODE_ENV === 'production' 
+    ? 'https://naija-result-connect.vercel.app' 
+    : 'http://localhost:3001';
 
   // Initialize EmailJS (call this once in your app)
   static initEmailJS() {
@@ -237,12 +237,9 @@ export class NotificationService {
   // Test SMS functionality
   static async testSMS(phoneNumber: string, message: string): Promise<boolean> {
     try {
-      const testUrl = this.SMS_SERVICE_URL ? `${this.SMS_SERVICE_URL}/api/test-sms` : '/api/test-sms';
-      
-      const response = await fetch(testUrl, {
+      const response = await fetch(`${this.SMS_SERVICE_URL}/api/test-sms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        mode: this.SMS_SERVICE_URL ? 'cors' : 'same-origin',
         body: JSON.stringify({ phoneNumber, message })
       });
 
@@ -278,14 +275,11 @@ export class NotificationService {
   static async checkSMSServiceHealth(): Promise<boolean> {
     try {
       console.log('🔍 Checking SMS service health...');
-      
-      // In production (Vercel), use relative URL; in development, use full URL
-      const healthUrl = this.SMS_SERVICE_URL ? `${this.SMS_SERVICE_URL}/api/health` : '/api/health';
-      
-      const response = await fetch(healthUrl, {
+      const response = await fetch(`${this.SMS_SERVICE_URL}/api/health`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
-        mode: this.SMS_SERVICE_URL ? 'cors' : 'same-origin'
+        mode: 'cors',
+        credentials: 'include'
       });
       
       if (response.ok) {
@@ -297,7 +291,7 @@ export class NotificationService {
         return false;
       }
     } catch (error) {
-      console.warn('⚠️ SMS service not available:', error);
+      console.error('❌ SMS service health check failed:', error);
       return false;
     }
   }
@@ -350,82 +344,336 @@ export class NotificationService {
     return Array.from(studentMap.values());
   }
 
-  private static formatDetailedEmailMessage(student: StudentResult): string {
-    const fullName = `${student.first_name} ${student.last_name}`;
-    const cgpa = student.cgpa ? student.cgpa.toFixed(2) : 'N/A';
-    
-    // Group results by academic year and semester
-    const groupedResults = new Map<string, any[]>();
-    
-    student.results.forEach(result => {
-      const key = `${result.academic_year} - ${result.semester}`;
-      if (!groupedResults.has(key)) {
-        groupedResults.set(key, []);
-      }
-      groupedResults.get(key)!.push(result);
+private static formatDetailedEmailMessage(student: StudentResult): string {
+  const fullName = `${student.first_name} ${student.last_name}`;
+  const cgpa = student.cgpa ? student.cgpa.toFixed(2) : 'N/A';
+
+  // Group results by academic year and semester
+  const groupedResults = new Map<string, any[]>();
+
+  student.results.forEach(result => {
+    const key = `${result.academic_year} - ${result.semester}`;
+    if (!groupedResults.has(key)) {
+      groupedResults.set(key, []);
+    }
+    groupedResults.get(key)!.push(result);
+  });
+
+  let courseResultsHTML = '';
+
+  for (const [period, results] of groupedResults) {
+    courseResultsHTML += `<div class="period-header">${period}</div>`;
+    courseResultsHTML += `<table class="results-table">
+      <thead>
+        <tr>
+          <th>Course Code</th>
+          <th>Course Title</th>
+          <th>CA Score</th>
+          <th>Exam Score</th>
+          <th>Total Score</th>
+          <th>Grade</th>
+          <th>Grade Point</th>
+          <th>Credit Units</th>
+        </tr>
+      </thead>
+      <tbody>`;
+
+    results.forEach(result => {
+      courseResultsHTML += `<tr>
+        <td class="course-code">${result.course_code}</td>
+        <td>${result.course_title}</td>
+        <td>${result.ca_score || 'N/A'}</td>
+        <td>${result.exam_score || 'N/A'}</td>
+        <td class="total-score">${result.total_score || 'N/A'}</td>
+        <td class="grade">${result.grade || 'N/A'}</td>
+        <td>${result.grade_point || 'N/A'}</td>
+        <td>${result.credit_units}</td>
+      </tr>`;
     });
 
-    let courseResultsText = '';
-    
-    for (const [period, results] of groupedResults) {
-      courseResultsText += `${period}:\n`;
-      courseResultsText += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
-      
-      results.forEach(result => {
-        courseResultsText += `${result.course_code} - ${result.course_title}\n`;
-        courseResultsText += `  Continuous Assessment: ${result.ca_score || 'N/A'}\n`;
-        courseResultsText += `  Examination Score: ${result.exam_score || 'N/A'}\n`;
-        courseResultsText += `  Total Score: ${result.total_score || 'N/A'}\n`;
-        courseResultsText += `  Grade: ${result.grade || 'N/A'}\n`;
-        courseResultsText += `  Grade Point: ${result.grade_point || 'N/A'}\n`;
-        courseResultsText += `  Credit Units: ${result.credit_units}\n\n`;
-      });
-    }
+    courseResultsHTML += `</tbody>
+    </table>`;
+  } const emailTemplate = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Academic Results Published - Moshood Abiola Polytechnic</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                font-family: Arial, sans-serif;
+                background-color: #f4f4f4;
+                line-height: 1.6;
+            }
+            .email-container {
+                max-width: 800px;
+                margin: 0 auto;
+                background-color: #ffffff;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            }
+            .header {
+                background-color: #2c3e50;
+                color: white;
+                padding: 20px;
+                text-align: center;
+            }
+            .header h1 {
+                margin: 0;
+                font-size: 24px;
+            }
+            .header p {
+                margin: 10px 0 0 0;
+                font-size: 16px;
+            }
+            .content {
+                padding: 30px;
+            }
+            .greeting {
+                font-size: 16px;
+                color: #2c3e50;
+                margin-bottom: 30px;
+            }
+            .intro-text {
+                font-size: 14px;
+                line-height: 1.6;
+                color: #34495e;
+                margin-bottom: 30px;
+            }
+            .student-info {
+                background-color: #ecf0f1;
+                padding: 20px;
+                border-radius: 5px;
+                margin-bottom: 30px;
+            }
+            .student-info h2 {
+                color: #2c3e50;
+                margin-top: 0;
+                margin-bottom: 20px;
+                font-size: 20px;
+            }
+            .info-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            .info-table td {
+                padding: 8px 0;
+                vertical-align: top;
+            }
+            .info-table td:first-child {
+                font-weight: bold;
+                color: #2c3e50;
+                width: 150px;
+            }
+            .info-table td:last-child {
+                color: #34495e;
+            }
+            .cgpa-value {
+                font-weight: bold;
+                font-size: 16px;
+            }
+            .results-section h2 {
+                color: #2c3e50;
+                margin-bottom: 20px;
+                font-size: 20px;
+            }
+            .period-header {
+                color: #2c3e50;
+                margin-top: 30px;
+                margin-bottom: 15px;
+                font-size: 18px;
+            }
+            .results-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+                font-family: Arial, sans-serif;
+            }
+            .results-table thead th {
+                background-color: #3498db;
+                color: white;
+                border: 1px solid #ddd;
+                padding: 12px;
+                text-align: left;
+                font-weight: bold;
+            }
+            .results-table tbody td {
+                border: 1px solid #ddd;
+                padding: 10px;
+            }
+            .results-table tbody tr:nth-child(even) {
+                background-color: #f9f9f9;
+            }
+            .results-table tbody tr:nth-child(odd) {
+                background-color: white;
+            }
+            .course-code {
+                font-weight: bold;
+                color: #2c3e50;
+            }
+            .total-score, .grade {
+                font-weight: bold;
+            }
+            .grade {
+                color: #e74c3c;
+            }
+            .text-center {
+                text-align: center;
+            }
+            .next-steps {
+                background-color: #e8f6f3;
+                padding: 20px;
+                border-radius: 5px;
+                margin-top: 30px;
+            }
+            .next-steps h3 {
+                color: #27ae60;
+                margin-top: 0;
+                margin-bottom: 15px;
+            }
+            .next-steps ul {
+                color: #2c3e50;
+                line-height: 1.6;
+                margin: 0;
+                padding-left: 20px;
+            }
+            .contact-info {
+                background-color: #fff3cd;
+                padding: 20px;
+                border-radius: 5px;
+                margin-top: 20px;
+            }
+            .contact-info h3 {
+                color: #856404;
+                margin-top: 0;
+                margin-bottom: 15px;
+            }
+            .contact-info table {
+                width: 100%;
+                color: #856404;
+            }
+            .contact-info td {
+                padding: 5px 0;
+                vertical-align: top;
+            }
+            .contact-info td:first-child {
+                font-weight: bold;
+                width: 180px;
+            }
+            .signature {
+                margin-top: 40px;
+                padding-top: 20px;
+                border-top: 2px solid #ecf0f1;
+                text-align: center;
+                color: #7f8c8d;
+            }
+            .signature p {
+                margin: 5px 0;
+            }
+            .signature .department {
+                font-weight: bold;
+                color: #2c3e50;
+            }
+            .footer {
+                background-color: #34495e;
+                color: #bdc3c7;
+                padding: 15px;
+                text-align: center;
+                font-size: 12px;
+            }
+            .footer p {
+                margin: 5px 0;
+            }
+            .footer .email-address {
+                font-weight: bold;
+            }
+            @media only screen and (max-width: 600px) {
+                .email-container {
+                    margin: 0;
+                    box-shadow: none;
+                }
+                .content {
+                    padding: 20px;
+                }
+                .results-table {
+                    font-size: 12px;
+                }
+                .results-table th,
+                .results-table td {
+                    padding: 6px;
+                }
+                .info-table td:first-child {
+                    width: 120px;
+                }
+                .contact-info td:first-child {
+                    width: 120px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="email-container">
+            <div class="header">
+                <h1>Academic Results Published - Moshood Abiola Polytechnic</h1>
+                <p>Moshood Abiola Polytechnic</p>
+            </div>
+            <div class="content">
+                <p class="greeting">Dear ${fullName},</p>
+                <p class="intro-text">
+                    We are pleased to inform you that your academic results have been published and are now available for your review.
+                </p>
+                <div class="student-info">
+                    <h2>Student Information</h2>
+                    <table class="info-table">
+                        <tr>
+                            <td>Student ID:</td>
+                            <td>${student.student_id}</td>
+                        </tr>
+                        <tr>
+                            <td>Email:</td>
+                            <td>${student.email}</td>
+                        </tr>
+                        <tr>
+                            <td>Current CGPA:</td>
+                            <td class="cgpa-value">${cgpa}</td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="results-section">
+                    <h2>Academic Results</h2>
+                    ${courseResultsHTML}
+                </div>
+                <div class="next-steps">
+                    <h3>Next Steps:</h3>
+                    <ul>
+                        <li>Log in to your EduNotify student portal for detailed information</li>
+                        <li>Download your official transcript if needed</li>
+                        <li>Contact the Academic Affairs Office if you have any questions</li>
+                    </ul>
+                </div>
+                
+            </div>
+            <div class="footer">
+                <p>This message was sent to <span class="email-address">${student.email}</span></p>
+                <p>Sent on ${new Date().toLocaleDateString('en-US', { 
+                  year: 'numeric', 
+                  month: 'long', 
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}</p>
+                <p>This is an official communication from Moshood Abiola Polytechnic.</p>
+                <p>Please add academic.affairs@edunotify to your contacts to ensure delivery.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+  `;
 
-    return `Dear ${fullName},
-
-We are pleased to inform you that your academic results have been published and are now available for your review.
-
-STUDENT INFORMATION:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Student ID: ${student.student_id}
-Current CGPA: ${cgpa}
-
-ACADEMIC RESULTS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-${courseResultsText}
-
- STEPS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Log in to your EduNotify student portal for detailed information
-2. Download your official transcript if needed
-3. Contact the Academic Affairs Office if you have any questions
-
-CONTACT INFORMATION:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Academic Affairs Office: +234-XXX-XXX-XXXX
-Email: academic.affairs@edunotify
-Student Help Desk: Available Monday-Friday, 8AM-5PM
-
-Best regards,
-
-Academic Affairs Department
-Moshood Abiola Polytechnic
-
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-This message was sent to ${student.email}
-Sent on ${new Date().toLocaleDateString('en-US', { 
-  year: 'numeric', 
-  month: 'long', 
-  day: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit'
-})}
-
-This is an official communication from Moshood Abiola Polytechnic.
-Please add academic.affairs@edunotify to your contacts to ensure delivery.`;
-  }
+  return emailTemplate;
+}
 
   private static async sendDetailedNotifications(
     studentResults: StudentResult[]
@@ -516,12 +764,9 @@ Please add academic.affairs@edunotify to your contacts to ensure delivery.`;
       try {
         console.log(`📱 Sending SMS notifications to ${studentResults.length} students...`);
         
-        const notifyUrl = this.SMS_SERVICE_URL ? `${this.SMS_SERVICE_URL}/api/notify-results` : '/api/notify-results';
-        
-        const response = await fetch(notifyUrl, {
+        const response = await fetch(`${this.SMS_SERVICE_URL}/api/notify-results`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          mode: this.SMS_SERVICE_URL ? 'cors' : 'same-origin',
           body: JSON.stringify({ 
             studentIds: studentResults.map(s => s.id), 
             title: 'Results Published', 
@@ -624,12 +869,9 @@ Please add academic.affairs@edunotify to your contacts to ensure delivery.`;
     const isSMSHealthy = await this.checkSMSServiceHealth();
     if (isSMSHealthy) {
       try {
-        const notifyUrl = this.SMS_SERVICE_URL ? `${this.SMS_SERVICE_URL}/api/notify-results` : '/api/notify-results';
-        
-        const response = await fetch(notifyUrl, {
+        const response = await fetch(`${this.SMS_SERVICE_URL}/api/notify-results`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          mode: this.SMS_SERVICE_URL ? 'cors' : 'same-origin',
           body: JSON.stringify({ 
             studentIds: students.map(s => s.id), 
             title, 
@@ -662,7 +904,7 @@ Please add academic.affairs@edunotify to your contacts to ensure delivery.`;
       student_id: student.id,
       title: 'Results Published',
       message: 'Your latest exam results have been published! Log in to view your results.',
-      type: 'result',
+      type: 'result_published',
       status: 'sent',
       sent_at: new Date().toISOString()
     }));
@@ -687,7 +929,7 @@ Please add academic.affairs@edunotify to your contacts to ensure delivery.`;
       student_id: student.id,
       title: title,
       message: message,
-      type: 'general',
+      type: 'custom',
       status: 'sent',
       sent_at: new Date().toISOString()
     }));
