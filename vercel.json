@@ -33,7 +33,7 @@
   ],
   "functions": {
     "server/api/*.js": {
-      "runtime": "nodejs20.x"
+      "runtime": "nodejs20.19.2"
     }
   }
 }
