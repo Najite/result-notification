@@ -27,8 +27,12 @@
       "dest": "/server/api/health.js"
     },
     {
+      "src": "/(.*\\.(js|css|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|json|map))",
+      "dest": "/$1"
+    },
+    {
       "src": "/(.*)",
-      "dest": "/main.tsx"
+      "dest": "/index.html"
     }
   ]
 }
