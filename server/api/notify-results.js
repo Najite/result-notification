@@ -20,7 +20,7 @@ const supabase = createClient(
 
 // SMS Configuration
 const SENDCHAMP_BASE_URL = 'https://api.sendchamp.com/api/v1';
-const SENDER_NAME = 'Schamp';
+const SENDER_NAME = 'SC-OTP';
 
 // Phone number formatter for Nigeria
 const formatPhone = (phone) => {
