@@ -1,18 +1,14 @@
-import { useState, useCallback, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { GoogleSheetsService } from '@/services/googleSheetsService';
-import { useToast } from '@/hooks/use-toast';
-
 // Initialize Supabase client
 import type { Database } from './types';
 
 const SUPABASE_URL = "https://ojmiubjjnvswaoprueio.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qbWl1YmpqbnZzd2FvcHJ1ZWlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMTQyODcsImV4cCI6MjA2NTU5MDI4N30.4djPgHjQsvOIIqw4AWwxHQR6t_PG3NhbVDuojpJqQDQ";
 
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
+import { useState, useCallback, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
+import { GoogleSheetsService } from '@/services/googleSheetsService';
+import { useToast } from '@/hooks/use-toast';
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
 // Mock data for demonstration
 const mockFeedbackData = [
@@ -99,6 +95,19 @@ const defaultSettings: FeedbackSettings = {
   refreshInterval: 5
 };
 
+// Generate a unique session ID for this browser session
+const getSessionId = () => {
+  if (typeof window !== 'undefined') {
+    let sessionId = localStorage.getItem('feedback_session_id');
+    if (!sessionId) {
+      sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      localStorage.setItem('feedback_session_id', sessionId);
+    }
+    return sessionId;
+  }
+  return 'default_session';
+};
+
 export const useFeedback = () => {
   const [feedbackData, setFeedbackData] = useState<FeedbackResponse[]>(mockFeedbackData);
   const [loading, setLoading] = useState(false);
@@ -108,14 +117,6 @@ export const useFeedback = () => {
   const [isConfigured, setIsConfigured] = useState(false);
   
   const { toast } = useToast();
-
-  // Get current user ID from localStorage (assuming you store it there after login)
-  const getCurrentUserId = () => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('auth_token') || localStorage.getItem('user_id');
-    }
-    return null;
-  };
 
   // Load settings from Supabase on mount
   useEffect(() => {
@@ -132,13 +133,9 @@ export const useFeedback = () => {
     setIsConfigured(configured);
   }, [settings]);
 
-  // Load settings from Supabase
+  // Load settings from Supabase using session ID
   const loadSettings = useCallback(async () => {
-    const userId = getCurrentUserId();
-    if (!userId) {
-      console.log('No user ID found, using default settings');
-      return;
-    }
+    const sessionId = getSessionId();
 
     try {
       setLoading(true);
@@ -146,7 +143,7 @@ export const useFeedback = () => {
       const { data, error } = await supabase
         .from('user_settings')
         .select('*')
-        .eq('admin_user_id', userId)
+        .eq('admin_user_id', sessionId)
         .single();
 
       if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
@@ -176,17 +173,9 @@ export const useFeedback = () => {
     }
   }, []);
 
-  // Save settings to Supabase
+  // Save settings to Supabase using session ID
   const saveSettings = useCallback(async (newSettings: Partial<FeedbackSettings>) => {
-    const userId = getCurrentUserId();
-    if (!userId) {
-      toast({
-        title: "Authentication Error",
-        description: "Please log in to save settings.",
-        variant: "destructive"
-      });
-      return false;
-    }
+    const sessionId = getSessionId();
 
     try {
       setLoading(true);
@@ -195,7 +184,7 @@ export const useFeedback = () => {
       const { data, error } = await supabase
         .from('user_settings')
         .upsert({
-          admin_user_id: userId,
+          admin_user_id: sessionId,
           google_form_url: updatedSettings.googleFormUrl,
           spreadsheet_id: updatedSettings.spreadsheetId,
           api_key: updatedSettings.apiKey,
@@ -523,23 +512,21 @@ export const useFeedback = () => {
 
   // Reset to defaults and delete from database
   const resetSettings = useCallback(async () => {
-    const userId = getCurrentUserId();
+    const sessionId = getSessionId();
     
-    if (userId) {
-      try {
-        const { error } = await supabase
-          .from('user_settings')
-          .delete()
-          .eq('admin_user_id', userId);
+    try {
+      const { error } = await supabase
+        .from('user_settings')
+        .delete()
+        .eq('admin_user_id', sessionId);
 
-        if (error) {
-          console.error('Error deleting settings from Supabase:', error);
-        } else {
-          console.log('Settings deleted from Supabase');
-        }
-      } catch (error) {
-        console.error('Error resetting settings:', error);
+      if (error) {
+        console.error('Error deleting settings from Supabase:', error);
+      } else {
+        console.log('Settings deleted from Supabase');
       }
+    } catch (error) {
+      console.error('Error resetting settings:', error);
     }
 
     setSettings(defaultSettings);
