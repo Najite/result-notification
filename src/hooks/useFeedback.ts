@@ -73,13 +73,27 @@ interface FeedbackSettings {
   refreshInterval: number; // in minutes
   enableCategories: string[];
   requireMessage: boolean;
+  formName: string;
 }
 
 const defaultSettings: FeedbackSettings = {
   autoRefresh: false,
   refreshInterval: 5,
   enableCategories: ['User Interface', 'Performance', 'Features', 'Bug Report', 'General'],
-  requireMessage: true
+  requireMessage: true,
+  formName: 'Anonymous Feedback Form'
+};
+
+// Generate a unique admin user ID for this session (replace with actual admin auth later)
+let currentAdminUserId: string | null = null;
+
+const getAdminUserId = () => {
+  if (!currentAdminUserId) {
+    // In a real app, this would come from your authentication system
+    // For now, we'll use a consistent ID or create a default admin
+    currentAdminUserId = 'default-admin-' + Date.now();
+  }
+  return currentAdminUserId;
 };
 
 export const useFeedback = () => {
@@ -90,10 +104,46 @@ export const useFeedback = () => {
   
   const { toast } = useToast();
 
+  // Check if tables exist
+  const checkTablesExist = useCallback(async () => {
+    try {
+      // Test if feedback_responses table exists
+      const { error: feedbackError } = await supabase
+        .from('feedback_responses')
+        .select('id')
+        .limit(1);
+
+      if (feedbackError && feedbackError.code === '42P01') {
+        console.error('feedback_responses table does not exist');
+        toast({
+          title: "Database Setup Required",
+          description: "Please create the feedback_responses table in your Supabase database.",
+          variant: "destructive"
+        });
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Error checking tables:', error);
+      return false;
+    }
+  }, [toast]);
+
   // Load feedback from database on mount
   useEffect(() => {
-    loadFeedbackData();
-    loadSettings();
+    const initialize = async () => {
+      const tablesExist = await checkTablesExist();
+      if (tablesExist) {
+        await loadFeedbackData();
+        await loadSettings();
+      } else {
+        // Use mock data if tables don't exist
+        setFeedbackData(mockFeedbackData);
+      }
+    };
+    
+    initialize();
   }, []);
 
   // Load all feedback from Supabase
@@ -108,6 +158,9 @@ export const useFeedback = () => {
         .order('created_at', { ascending: false });
 
       if (error) {
+        if (error.code === '42P01') {
+          throw new Error('Database table missing. Please run the table creation script.');
+        }
         console.error('Error loading feedback:', error);
         throw new Error(error.message);
       }
@@ -134,7 +187,7 @@ export const useFeedback = () => {
       
       toast({
         title: "Database Connection Error",
-        description: "Using sample data. Please check your database connection.",
+        description: "Using sample data. Please check your database setup.",
         variant: "destructive"
       });
     } finally {
@@ -142,12 +195,15 @@ export const useFeedback = () => {
     }
   }, [toast]);
 
-  // Load settings from Supabase
+  // Load settings from user_settings table
   const loadSettings = useCallback(async () => {
     try {
+      const adminUserId = getAdminUserId();
+      
       const { data, error } = await supabase
-        .from('feedback_settings')
+        .from('user_settings')
         .select('*')
+        .eq('admin_user_id', adminUserId)
         .single();
 
       if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
@@ -159,8 +215,9 @@ export const useFeedback = () => {
         const loadedSettings: FeedbackSettings = {
           autoRefresh: data.auto_refresh || false,
           refreshInterval: data.refresh_interval || 5,
-          enableCategories: data.enabled_categories || defaultSettings.enableCategories,
-          requireMessage: data.require_message !== false
+          enableCategories: ['User Interface', 'Performance', 'Features', 'Bug Report', 'General'], // Default categories
+          requireMessage: true, // Always require message for feedback
+          formName: data.form_name || 'Anonymous Feedback Form'
         };
         
         setSettings(loadedSettings);
@@ -172,24 +229,29 @@ export const useFeedback = () => {
     }
   }, []);
 
-  // Save settings to Supabase
+  // Save settings to user_settings table
   const saveSettings = useCallback(async (newSettings: Partial<FeedbackSettings>) => {
     try {
       setLoading(true);
       const updatedSettings = { ...settings, ...newSettings };
+      const adminUserId = getAdminUserId();
       
       const settingsToSave = {
+        admin_user_id: adminUserId,
+        form_name: updatedSettings.formName || 'Anonymous Feedback Form',
+        google_form_url: '', // Not used for direct database storage
+        spreadsheet_id: '', // Not used for direct database storage
+        api_key: '', // Not used for direct database storage
+        sheet_range: 'Form Responses 1!A:G', // Not used but keeping for compatibility
         auto_refresh: updatedSettings.autoRefresh,
         refresh_interval: updatedSettings.refreshInterval,
-        enabled_categories: updatedSettings.enableCategories,
-        require_message: updatedSettings.requireMessage,
         updated_at: new Date().toISOString()
       };
 
       const { error } = await supabase
-        .from('feedback_settings')
+        .from('user_settings')
         .upsert(settingsToSave, {
-          onConflict: 'id'
+          onConflict: 'admin_user_id'
         });
 
       if (error) {
@@ -243,7 +305,8 @@ export const useFeedback = () => {
         category: feedback.category.trim(),
         message: feedback.message?.trim() || '',
         status: 'new',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       };
 
       const { data, error } = await supabase
@@ -456,8 +519,9 @@ export const useFeedback = () => {
 
   // Get unique categories
   const getCategories = useCallback(() => {
-    return [...new Set(feedbackData.map(item => item.category))];
-  }, [feedbackData]);
+    const dbCategories = [...new Set(feedbackData.map(item => item.category))];
+    return dbCategories.length > 0 ? dbCategories : settings.enableCategories;
+  }, [feedbackData, settings.enableCategories]);
 
   // Export feedback data
   const exportFeedbackData = useCallback((format: 'csv' | 'json' = 'csv') => {
@@ -525,6 +589,43 @@ export const useFeedback = () => {
     await loadFeedbackData();
   }, [loadFeedbackData]);
 
+  // Test database connection
+  const testConnection = useCallback(async () => {
+    try {
+      setLoading(true);
+      
+      // Test feedback_responses table
+      const { error } = await supabase
+        .from('feedback_responses')
+        .select('id')
+        .limit(1);
+
+      if (error) {
+        if (error.code === '42P01') {
+          throw new Error('feedback_responses table does not exist. Please create it first.');
+        }
+        throw new Error(error.message);
+      }
+
+      toast({
+        title: "Connection Successful",
+        description: "Successfully connected to the database."
+      });
+      
+      return true;
+    } catch (error) {
+      console.error('Connection test error:', error);
+      toast({
+        title: "Connection Error",
+        description: error instanceof Error ? error.message : "Failed to connect to database.",
+        variant: "destructive"
+      });
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
   return {
     feedbackData,
     loading,
@@ -540,6 +641,7 @@ export const useFeedback = () => {
     filterFeedback,
     getCategories,
     exportFeedbackData,
+    testConnection,
     clearError
   };
 };
