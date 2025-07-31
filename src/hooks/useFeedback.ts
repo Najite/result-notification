@@ -1,19 +1,14 @@
 import { useState, useCallback, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { GoogleSheetsService } from '@/services/googleSheetsService';
 import { useToast } from '@/hooks/use-toast';
-
-import type { Database } from './types';
-
-const SUPABASE_URL = "https://ojmiubjjnvswaoprueio.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qbWl1YmpqbnZzd2FvcHJ1ZWlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMTQyODcsImV4cCI6MjA2NTU5MDI4N30.4djPgHjQsvOIIqw4AWwxHQR6t_PG3NhbVDuojpJqQDQ";
-
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
 // Mock data for demonstration
 const mockFeedbackData = [
   {
     id: '1',
     timestamp: '2024-01-15T10:30:00Z',
+    name: 'John Doe',
+    email: 'john.doe@student.edu',
     rating: 5,
     category: 'User Interface',
     message: 'The new dashboard is amazing! Very intuitive and easy to navigate.',
@@ -22,6 +17,8 @@ const mockFeedbackData = [
   {
     id: '2',
     timestamp: '2024-01-14T14:20:00Z',
+    name: 'Jane Smith',
+    email: 'jane.smith@student.edu',
     rating: 4,
     category: 'Notifications',
     message: 'SMS notifications work great, but email notifications could be faster.',
@@ -30,6 +27,8 @@ const mockFeedbackData = [
   {
     id: '3',
     timestamp: '2024-01-13T09:15:00Z',
+    name: 'David Johnson',
+    email: 'david.j@student.edu',
     rating: 3,
     category: 'Performance',
     message: 'The system is good but sometimes loads slowly during peak hours.',
@@ -38,6 +37,8 @@ const mockFeedbackData = [
   {
     id: '4',
     timestamp: '2024-01-12T16:45:00Z',
+    name: 'Sarah Wilson',
+    email: 'sarah.w@student.edu',
     rating: 5,
     category: 'Features',
     message: 'Love the new result tracking feature! Very helpful for monitoring progress.',
@@ -46,6 +47,8 @@ const mockFeedbackData = [
   {
     id: '5',
     timestamp: '2024-01-11T11:30:00Z',
+    name: 'Michael Brown',
+    email: 'michael.b@student.edu',
     rating: 2,
     category: 'Bug Report',
     message: 'Found a bug where the CGPA calculation seems incorrect for some courses.',
@@ -56,172 +59,67 @@ const mockFeedbackData = [
 interface FeedbackResponse {
   id: string;
   timestamp: string;
+  name: string;
+  email: string;
   rating: number;
   category: string;
   message: string;
   status: 'new' | 'reviewed' | 'resolved';
 }
 
-interface FeedbackInput {
-  rating: number;
-  category: string;
-  message: string;
-}
-
 interface FeedbackSettings {
+  googleFormUrl: string;
+  spreadsheetId: string;
+  apiKey: string;
+  formName: string;
+  sheetRange: string;
   autoRefresh: boolean;
   refreshInterval: number; // in minutes
-  enableCategories: string[];
-  requireMessage: boolean;
-  formName: string;
 }
 
 const defaultSettings: FeedbackSettings = {
+  googleFormUrl: '',
+  spreadsheetId: '',
+  apiKey: '',
+  formName: '',
+  sheetRange: 'Form Responses 1!A:G',
   autoRefresh: false,
-  refreshInterval: 5,
-  enableCategories: ['User Interface', 'Performance', 'Features', 'Bug Report', 'General'],
-  requireMessage: true,
-  formName: 'Anonymous Feedback Form'
-};
-
-// Generate a unique admin user ID for this session (replace with actual admin auth later)
-let currentAdminUserId: string | null = null;
-
-const getAdminUserId = () => {
-  if (!currentAdminUserId) {
-    // In a real app, this would come from your authentication system
-    // For now, we'll use a consistent ID or create a default admin
-    currentAdminUserId = 'default-admin-' + Date.now();
-  }
-  return currentAdminUserId;
+  refreshInterval: 5
 };
 
 export const useFeedback = () => {
-  const [feedbackData, setFeedbackData] = useState<FeedbackResponse[]>([]);
+  const [feedbackData, setFeedbackData] = useState<FeedbackResponse[]>(mockFeedbackData);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [availableSheets, setAvailableSheets] = useState<string[]>([]);
   const [settings, setSettings] = useState<FeedbackSettings>(defaultSettings);
+  const [isConfigured, setIsConfigured] = useState(false);
   
   const { toast } = useToast();
 
-  // Check if tables exist
-  const checkTablesExist = useCallback(async () => {
-    try {
-      // Test if feedback_responses table exists
-      const { error: feedbackError } = await supabase
-        .from('feedback_responses')
-        .select('id')
-        .limit(1);
-
-      if (feedbackError && feedbackError.code === '42P01') {
-        console.error('feedback_responses table does not exist');
-        toast({
-          title: "Database Setup Required",
-          description: "Please create the feedback_responses table in your Supabase database.",
-          variant: "destructive"
-        });
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      console.error('Error checking tables:', error);
-      return false;
-    }
-  }, [toast]);
-
-  // Load feedback from database on mount
+  // Load settings from localStorage on mount
   useEffect(() => {
-    const initialize = async () => {
-      const tablesExist = await checkTablesExist();
-      if (tablesExist) {
-        await loadFeedbackData();
-        await loadSettings();
-      } else {
-        // Use mock data if tables don't exist
-        setFeedbackData(mockFeedbackData);
-      }
-    };
-    
-    initialize();
+    loadSettings();
   }, []);
 
-  // Load all feedback from Supabase
-  const loadFeedbackData = useCallback(async () => {
+  // Check if settings are properly configured
+  useEffect(() => {
+    const configured = !!(
+      settings.spreadsheetId?.trim() && 
+      settings.apiKey?.trim() && 
+      settings.sheetRange?.trim()
+    );
+    setIsConfigured(configured);
+  }, [settings]);
+
+  // Load settings from localStorage
+  const loadSettings = useCallback(() => {
     try {
-      setLoading(true);
-      setError(null);
-      
-      const { data, error } = await supabase
-        .from('feedback_responses')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        if (error.code === '42P01') {
-          throw new Error('Database table missing. Please run the table creation script.');
-        }
-        console.error('Error loading feedback:', error);
-        throw new Error(error.message);
-      }
-
-      // Transform database data to component format
-      const transformedData: FeedbackResponse[] = (data || []).map(item => ({
-        id: item.id,
-        timestamp: item.created_at,
-        rating: item.rating,
-        category: item.category,
-        message: item.message,
-        status: item.status as 'new' | 'reviewed' | 'resolved'
-      }));
-
-      setFeedbackData(transformedData);
-      console.log(`Loaded ${transformedData.length} feedback responses from database`);
-      
-    } catch (error) {
-      console.error('Error loading feedback data:', error);
-      setError(error instanceof Error ? error.message : 'Failed to load feedback data');
-      
-      // Fallback to mock data if database fails
-      setFeedbackData(mockFeedbackData);
-      
-      toast({
-        title: "Database Connection Error",
-        description: "Using sample data. Please check your database setup.",
-        variant: "destructive"
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
-
-  // Load settings from user_settings table
-  const loadSettings = useCallback(async () => {
-    try {
-      const adminUserId = getAdminUserId();
-      
-      const { data, error } = await supabase
-        .from('user_settings')
-        .select('*')
-        .eq('admin_user_id', adminUserId)
-        .single();
-
-      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
-        console.error('Error loading settings:', error);
-        return;
-      }
-
-      if (data) {
-        const loadedSettings: FeedbackSettings = {
-          autoRefresh: data.auto_refresh || false,
-          refreshInterval: data.refresh_interval || 5,
-          enableCategories: ['User Interface', 'Performance', 'Features', 'Bug Report', 'General'], // Default categories
-          requireMessage: true, // Always require message for feedback
-          formName: data.form_name || 'Anonymous Feedback Form'
-        };
-        
-        setSettings(loadedSettings);
-        console.log('Loaded settings from database:', loadedSettings);
+      const savedSettings = localStorage.getItem('feedbackSettings');
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
+        setSettings(prev => ({ ...prev, ...parsed }));
+        console.log('Loaded settings:', parsed);
       }
     } catch (error) {
       console.error('Error loading feedback settings:', error);
@@ -229,37 +127,14 @@ export const useFeedback = () => {
     }
   }, []);
 
-  // Save settings to user_settings table
-  const saveSettings = useCallback(async (newSettings: Partial<FeedbackSettings>) => {
+  // Save settings to localStorage
+  const saveSettings = useCallback((newSettings: Partial<FeedbackSettings>) => {
     try {
-      setLoading(true);
       const updatedSettings = { ...settings, ...newSettings };
-      const adminUserId = getAdminUserId();
-      
-      const settingsToSave = {
-        admin_user_id: adminUserId,
-        form_name: updatedSettings.formName || 'Anonymous Feedback Form',
-        google_form_url: '', // Not used for direct database storage
-        spreadsheet_id: '', // Not used for direct database storage
-        api_key: '', // Not used for direct database storage
-        sheet_range: 'Form Responses 1!A:G', // Not used but keeping for compatibility
-        auto_refresh: updatedSettings.autoRefresh,
-        refresh_interval: updatedSettings.refreshInterval,
-        updated_at: new Date().toISOString()
-      };
-
-      const { error } = await supabase
-        .from('user_settings')
-        .upsert(settingsToSave, {
-          onConflict: 'admin_user_id'
-        });
-
-      if (error) {
-        console.error('Supabase error details:', error);
-        throw new Error(error.message);
-      }
-
       setSettings(updatedSettings);
+      localStorage.setItem('feedbackSettings', JSON.stringify(updatedSettings));
+      
+      console.log('Saved settings:', updatedSettings);
       
       toast({
         title: "Settings Saved",
@@ -269,173 +144,234 @@ export const useFeedback = () => {
       return true;
     } catch (error) {
       console.error('Error saving feedback settings:', error);
-      
       toast({
         title: "Error",
-        description: error instanceof Error ? error.message : "Failed to save settings.",
+        description: "Failed to save settings.",
         variant: "destructive"
       });
       return false;
-    } finally {
-      setLoading(false);
     }
   }, [settings, toast]);
 
-  // Submit new feedback to database
-  const submitFeedback = useCallback(async (feedback: FeedbackInput) => {
+  // Validate current settings
+  const validateSettings = useCallback(() => {
+    const errors = [];
+    
+    if (!settings.spreadsheetId?.trim()) {
+      errors.push('Spreadsheet ID is required');
+    } else if (!GoogleSheetsService.validateSpreadsheetId(settings.spreadsheetId)) {
+      errors.push('Invalid Spreadsheet ID format');
+    }
+    
+    if (!settings.apiKey?.trim()) {
+      errors.push('API Key is required');
+    } else if (!GoogleSheetsService.validateApiKey(settings.apiKey)) {
+      errors.push('Invalid API Key format');
+    }
+    
+    if (!settings.sheetRange?.trim()) {
+      errors.push('Sheet Range is required');
+    }
+    
+    return errors;
+  }, [settings]);
+
+  // Fetch available sheets
+  const fetchAvailableSheets = useCallback(async () => {
+    const validationErrors = validateSettings();
+    if (validationErrors.length > 0) {
+      console.log('Cannot fetch sheets - validation errors:', validationErrors);
+      return;
+    }
+
     try {
       setLoading(true);
-      setError(null);
-
-      // Validate input
-      if (!feedback.rating || feedback.rating < 1 || feedback.rating > 5) {
-        throw new Error('Rating must be between 1 and 5');
-      }
-
-      if (!feedback.category?.trim()) {
-        throw new Error('Category is required');
-      }
-
-      if (settings.requireMessage && !feedback.message?.trim()) {
-        throw new Error('Message is required');
-      }
-
-      const feedbackToSave = {
-        rating: feedback.rating,
-        category: feedback.category.trim(),
-        message: feedback.message?.trim() || '',
-        status: 'new',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      const { data, error } = await supabase
-        .from('feedback_responses')
-        .insert([feedbackToSave])
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Error submitting feedback:', error);
-        throw new Error(error.message);
-      }
-
-      // Add new feedback to local state
-      const newFeedback: FeedbackResponse = {
-        id: data.id,
-        timestamp: data.created_at,
-        rating: data.rating,
-        category: data.category,
-        message: data.message,
-        status: data.status as 'new' | 'reviewed' | 'resolved'
-      };
-
-      setFeedbackData(prev => [newFeedback, ...prev]);
-
-      toast({
-        title: "Feedback Submitted",
-        description: "Thank you for your feedback! It has been saved successfully."
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Error submitting feedback:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to submit feedback';
-      setError(errorMessage);
+      const sheets = await GoogleSheetsService.getAvailableSheets(
+        settings.spreadsheetId,
+        settings.apiKey
+      );
+      setAvailableSheets(sheets);
+      console.log('Available sheets:', sheets);
       
       toast({
-        title: "Submission Error",
-        description: errorMessage,
+        title: "Sheets Loaded",
+        description: `Found ${sheets.length} sheet(s) in the spreadsheet.`
+      });
+    } catch (error) {
+      console.error('Error fetching available sheets:', error);
+      setAvailableSheets([]);
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to fetch sheets.",
         variant: "destructive"
       });
+    } finally {
+      setLoading(false);
+    }
+  }, [settings.spreadsheetId, settings.apiKey, validateSettings, toast]);
+
+  // Fetch feedback data from Google Sheets
+  const fetchFeedbackData = useCallback(async (showToast: boolean = true) => {
+    console.log('Attempting to fetch feedback data...');
+    console.log('Current settings:', settings);
+    console.log('Is configured:', isConfigured);
+
+    // Validate settings first
+    const validationErrors = validateSettings();
+    if (validationErrors.length > 0) {
+      console.log('Validation errors:', validationErrors);
+      if (showToast) {
+        toast({
+          title: "Configuration Required",
+          description: `Please configure: ${validationErrors.join(', ')}`,
+          variant: "destructive"
+        });
+      }
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      console.log('Fetching from Google Sheets with:', {
+        spreadsheetId: settings.spreadsheetId,
+        range: settings.sheetRange,
+        formName: settings.formName
+      });
+
+      const data = await GoogleSheetsService.fetchFeedbackResponses(
+        settings.spreadsheetId,
+        settings.apiKey,
+        settings.sheetRange,
+        settings.formName
+      );
       
+      console.log('Fetched data:', data);
+      setFeedbackData(data);
+      
+      if (showToast) {
+        toast({
+          title: "Feedback Updated",
+          description: `Successfully fetched ${data.length} feedback responses.`
+        });
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to fetch feedback data';
+      console.error('Fetch error:', err);
+      setError(errorMessage);
+      
+      // Keep existing data on error
+      if (showToast) {
+        toast({
+          title: "Error Fetching Data",
+          description: errorMessage,
+          variant: "destructive"
+        });
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [settings, isConfigured, validateSettings, toast]);
+
+  // Test Google Sheets connection
+  const testConnection = useCallback(async () => {
+    console.log('Testing connection...');
+    
+    const validationErrors = validateSettings();
+    if (validationErrors.length > 0) {
+      toast({
+        title: "Configuration Incomplete",
+        description: `Please provide: ${validationErrors.join(', ')}`,
+        variant: "destructive"
+      });
+      return false;
+    }
+
+    setLoading(true);
+    
+    try {
+      console.log('Testing connection with:', {
+        spreadsheetId: settings.spreadsheetId,
+        apiKey: settings.apiKey.substring(0, 10) + '...',
+        range: settings.sheetRange
+      });
+
+      const isConnected = await GoogleSheetsService.testConnection(
+        settings.spreadsheetId,
+        settings.apiKey,
+        settings.sheetRange
+      );
+      
+      if (isConnected) {
+        toast({
+          title: "Connection Successful",
+          description: "Successfully connected to Google Sheets."
+        });
+        
+        // Fetch available sheets after successful connection
+        await fetchAvailableSheets();
+        return true;
+      } else {
+        toast({
+          title: "Connection Failed",
+          description: "Failed to connect to Google Sheets. Please check your credentials and permissions.",
+          variant: "destructive"
+        });
+        return false;
+      }
+    } catch (error) {
+      console.error('Connection test error:', error);
+      toast({
+        title: "Connection Error",
+        description: error instanceof Error ? error.message : "An error occurred while testing the connection.",
+        variant: "destructive"
+      });
       return false;
     } finally {
       setLoading(false);
     }
-  }, [settings.requireMessage, toast]);
+  }, [settings, validateSettings, toast, fetchAvailableSheets]);
 
-  // Update feedback status in database
-  const updateFeedbackStatus = useCallback(async (feedbackId: string, newStatus: 'new' | 'reviewed' | 'resolved') => {
+  // Create new Google Form
+  const createNewForm = useCallback(async (title: string, description: string) => {
     try {
-      setLoading(true);
-
-      const { error } = await supabase
-        .from('feedback_responses')
-        .update({ 
-          status: newStatus,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', feedbackId);
-
-      if (error) {
-        console.error('Error updating feedback status:', error);
-        throw new Error(error.message);
-      }
-
-      // Update local state
-      setFeedbackData(prev => 
-        prev.map(item => 
-          item.id === feedbackId 
-            ? { ...item, status: newStatus }
-            : item
-        )
-      );
+      // Generate template URL with pre-filled fields
+      const templateUrl = GoogleSheetsService.generateFormTemplate(title, description);
+      
+      // Open the template URL in a new tab
+      window.open(templateUrl, '_blank');
       
       toast({
-        title: "Status Updated",
-        description: `Feedback marked as ${newStatus}.`
+        title: "Form Template Opened",
+        description: "A new tab has opened with a Google Form template. Please customize and save it, then link it to a spreadsheet.",
       });
-
+      
       return true;
     } catch (error) {
-      console.error('Error updating feedback status:', error);
       toast({
-        title: "Update Error",
-        description: error instanceof Error ? error.message : "Failed to update status.",
+        title: "Error",
+        description: "Failed to create form template.",
         variant: "destructive"
       });
       return false;
-    } finally {
-      setLoading(false);
     }
   }, [toast]);
 
-  // Delete feedback from database
-  const deleteFeedback = useCallback(async (feedbackId: string) => {
-    try {
-      setLoading(true);
-
-      const { error } = await supabase
-        .from('feedback_responses')
-        .delete()
-        .eq('id', feedbackId);
-
-      if (error) {
-        console.error('Error deleting feedback:', error);
-        throw new Error(error.message);
-      }
-
-      // Remove from local state
-      setFeedbackData(prev => prev.filter(item => item.id !== feedbackId));
-      
-      toast({
-        title: "Feedback Deleted",
-        description: "Feedback has been permanently deleted."
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Error deleting feedback:', error);
-      toast({
-        title: "Delete Error",
-        description: error instanceof Error ? error.message : "Failed to delete feedback.",
-        variant: "destructive"
-      });
-      return false;
-    } finally {
-      setLoading(false);
-    }
+  // Update feedback status (local only - for UI purposes)
+  const updateFeedbackStatus = useCallback((feedbackId: string, newStatus: 'new' | 'reviewed' | 'resolved') => {
+    setFeedbackData(prev => 
+      prev.map(item => 
+        item.id === feedbackId 
+          ? { ...item, status: newStatus }
+          : item
+      )
+    );
+    
+    toast({
+      title: "Status Updated",
+      description: `Feedback marked as ${newStatus}.`
+    });
   }, [toast]);
 
   // Get feedback statistics
@@ -445,7 +381,6 @@ export const useFeedback = () => {
       ? feedbackData.reduce((sum, item) => sum + item.rating, 0) / totalResponses 
       : 0;
     const newFeedback = feedbackData.filter(item => item.status === 'new').length;
-    const reviewedFeedback = feedbackData.filter(item => item.status === 'reviewed').length;
     const resolvedFeedback = feedbackData.filter(item => item.status === 'resolved').length;
     
     const categoryBreakdown = feedbackData.reduce((acc, item) => {
@@ -458,36 +393,13 @@ export const useFeedback = () => {
       return acc;
     }, {} as Record<number, number>);
 
-    // Calculate trends (last 7 days vs previous 7 days)
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-
-    const recentFeedback = feedbackData.filter(item => 
-      new Date(item.timestamp) >= sevenDaysAgo
-    );
-    const previousFeedback = feedbackData.filter(item => {
-      const date = new Date(item.timestamp);
-      return date >= fourteenDaysAgo && date < sevenDaysAgo;
-    });
-
-    const recentAverage = recentFeedback.length > 0 
-      ? recentFeedback.reduce((sum, item) => sum + item.rating, 0) / recentFeedback.length 
-      : 0;
-    const previousAverage = previousFeedback.length > 0 
-      ? previousFeedback.reduce((sum, item) => sum + item.rating, 0) / previousFeedback.length 
-      : 0;
-
     return {
       totalResponses,
       averageRating,
       newFeedback,
-      reviewedFeedback,
       resolvedFeedback,
       categoryBreakdown,
-      ratingDistribution,
-      recentFeedback: recentFeedback.length,
-      ratingTrend: recentAverage - previousAverage
+      ratingDistribution
     };
   }, [feedbackData]);
 
@@ -496,11 +408,11 @@ export const useFeedback = () => {
     searchTerm: string = '',
     category: string = 'all',
     rating: string = 'all',
-    status: string = 'all',
-    dateRange?: { start: Date; end: Date }
+    status: string = 'all'
   ) => {
     return feedbackData.filter(item => {
       const matchesSearch = 
+        item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.message.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.category.toLowerCase().includes(searchTerm.toLowerCase());
       
@@ -508,122 +420,30 @@ export const useFeedback = () => {
       const matchesRating = rating === 'all' || item.rating.toString() === rating;
       const matchesStatus = status === 'all' || item.status === status;
       
-      const matchesDateRange = !dateRange || (
-        new Date(item.timestamp) >= dateRange.start &&
-        new Date(item.timestamp) <= dateRange.end
-      );
-      
-      return matchesSearch && matchesCategory && matchesRating && matchesStatus && matchesDateRange;
+      return matchesSearch && matchesCategory && matchesRating && matchesStatus;
     });
   }, [feedbackData]);
 
   // Get unique categories
   const getCategories = useCallback(() => {
-    const dbCategories = [...new Set(feedbackData.map(item => item.category))];
-    return dbCategories.length > 0 ? dbCategories : settings.enableCategories;
-  }, [feedbackData, settings.enableCategories]);
-
-  // Export feedback data
-  const exportFeedbackData = useCallback((format: 'csv' | 'json' = 'csv') => {
-    try {
-      let content: string;
-      let filename: string;
-      let mimeType: string;
-
-      if (format === 'csv') {
-        const headers = ['Timestamp', 'Rating', 'Category', 'Message', 'Status'];
-        const csvContent = [
-          headers.join(','),
-          ...feedbackData.map(item => [
-            item.timestamp,
-            item.rating,
-            `"${item.category}"`,
-            `"${item.message.replace(/"/g, '""')}"`,
-            item.status
-          ].join(','))
-        ].join('\n');
-        
-        content = csvContent;
-        filename = `feedback-export-${new Date().toISOString().split('T')[0]}.csv`;
-        mimeType = 'text/csv';
-      } else {
-        content = JSON.stringify(feedbackData, null, 2);
-        filename = `feedback-export-${new Date().toISOString().split('T')[0]}.json`;
-        mimeType = 'application/json';
-      }
-
-      const blob = new Blob([content], { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      toast({
-        title: "Export Successful",
-        description: `Feedback data exported as ${format.toUpperCase()}`
-      });
-      
-      return true;
-    } catch (error) {
-      console.error('Export error:', error);
-      toast({
-        title: "Export Error",
-        description: "Failed to export feedback data",
-        variant: "destructive"
-      });
-      return false;
-    }
-  }, [feedbackData, toast]);
+    return [...new Set(feedbackData.map(item => item.category))];
+  }, [feedbackData]);
 
   // Clear error
   const clearError = useCallback(() => {
     setError(null);
   }, []);
 
-  // Refresh feedback data
-  const refreshFeedbackData = useCallback(async () => {
-    await loadFeedbackData();
-  }, [loadFeedbackData]);
-
-  // Test database connection
-  const testConnection = useCallback(async () => {
-    try {
-      setLoading(true);
-      
-      // Test feedback_responses table
-      const { error } = await supabase
-        .from('feedback_responses')
-        .select('id')
-        .limit(1);
-
-      if (error) {
-        if (error.code === '42P01') {
-          throw new Error('feedback_responses table does not exist. Please create it first.');
-        }
-        throw new Error(error.message);
-      }
-
-      toast({
-        title: "Connection Successful",
-        description: "Successfully connected to the database."
-      });
-      
-      return true;
-    } catch (error) {
-      console.error('Connection test error:', error);
-      toast({
-        title: "Connection Error",
-        description: error instanceof Error ? error.message : "Failed to connect to database.",
-        variant: "destructive"
-      });
-      return false;
-    } finally {
-      setLoading(false);
-    }
+  // Reset to defaults
+  const resetSettings = useCallback(() => {
+    setSettings(defaultSettings);
+    localStorage.removeItem('feedbackSettings');
+    setAvailableSheets([]);
+    setIsConfigured(false);
+    toast({
+      title: "Settings Reset",
+      description: "All feedback settings have been reset to defaults."
+    });
   }, [toast]);
 
   return {
@@ -631,17 +451,20 @@ export const useFeedback = () => {
     loading,
     error,
     settings,
-    submitFeedback,
-    loadFeedbackData,
-    refreshFeedbackData,
+    availableSheets,
+    isConfigured,
+    loadSettings,
     saveSettings,
+    fetchFeedbackData,
+    fetchAvailableSheets,
+    testConnection,
+    createNewForm,
     updateFeedbackStatus,
-    deleteFeedback,
     getStatistics,
     filterFeedback,
     getCategories,
-    exportFeedbackData,
-    testConnection,
-    clearError
+    validateSettings,
+    clearError,
+    resetSettings
   };
 };
