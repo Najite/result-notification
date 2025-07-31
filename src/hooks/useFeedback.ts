@@ -1,14 +1,17 @@
-// Initialize Supabase client
-import type { Database } from './types';
-
-const SUPABASE_URL = "https://ojmiubjjnvswaoprueio.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qbWl1YmpqbnZzd2FvcHJ1ZWlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMTQyODcsImV4cCI6MjA2NTU5MDI4N30.4djPgHjQsvOIIqw4AWwxHQR6t_PG3NhbVDuojpJqQDQ";
-
 import { useState, useCallback, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleSheetsService } from '@/services/googleSheetsService';
 import { useToast } from '@/hooks/use-toast';
 
+import type { Database } from './types';
+
+const SUPABASE_URL = "https://ojmiubjjnvswaoprueio.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qbWl1YmpqbnZzd2FvcHJ1ZWlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMTQyODcsImV4cCI6MjA2NTU5MDI4N30.4djPgHjQsvOIIqw4AWwxHQR6t_PG3NhbVDuojpJqQDQ";
+
+// Import the supabase client like this:
+// import { supabase } from "@/integrations/supabase/client";
+
+export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
 // Mock data for demonstration
 const mockFeedbackData = [
