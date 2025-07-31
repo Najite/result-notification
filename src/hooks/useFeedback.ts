@@ -1,6 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import { GoogleSheetsService } from '@/services/googleSheetsService';
 import { useToast } from '@/hooks/use-toast';
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 // Mock data for demonstration
 const mockFeedbackData = [
@@ -97,7 +104,15 @@ export const useFeedback = () => {
   
   const { toast } = useToast();
 
-  // Load settings from localStorage on mount
+  // Get current user ID from localStorage (assuming you store it there after login)
+  const getCurrentUserId = () => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('auth_token') || localStorage.getItem('user_id');
+    }
+    return null;
+  };
+
+  // Load settings from Supabase on mount
   useEffect(() => {
     loadSettings();
   }, []);
@@ -112,29 +127,94 @@ export const useFeedback = () => {
     setIsConfigured(configured);
   }, [settings]);
 
-  // Load settings from localStorage
-  const loadSettings = useCallback(() => {
+  // Load settings from Supabase
+  const loadSettings = useCallback(async () => {
+    const userId = getCurrentUserId();
+    if (!userId) {
+      console.log('No user ID found, using default settings');
+      return;
+    }
+
     try {
-      const savedSettings = localStorage.getItem('feedbackSettings');
-      if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
-        setSettings(prev => ({ ...prev, ...parsed }));
-        console.log('Loaded settings:', parsed);
+      setLoading(true);
+      
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('*')
+        .eq('admin_user_id', userId)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
+        console.error('Error loading settings:', error);
+        return;
+      }
+
+      if (data) {
+        const loadedSettings = {
+          googleFormUrl: data.google_form_url || '',
+          spreadsheetId: data.spreadsheet_id || '',
+          apiKey: data.api_key || '',
+          formName: data.form_name || '',
+          sheetRange: data.sheet_range || 'Form Responses 1!A:G',
+          autoRefresh: data.auto_refresh || false,
+          refreshInterval: data.refresh_interval || 5
+        };
+        
+        setSettings(loadedSettings);
+        console.log('Loaded settings from Supabase:', loadedSettings);
       }
     } catch (error) {
       console.error('Error loading feedback settings:', error);
       setSettings(defaultSettings);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  // Save settings to localStorage
-  const saveSettings = useCallback((newSettings: Partial<FeedbackSettings>) => {
+  // Save settings to Supabase
+  const saveSettings = useCallback(async (newSettings: Partial<FeedbackSettings>) => {
+    const userId = getCurrentUserId();
+    if (!userId) {
+      toast({
+        title: "Authentication Error",
+        description: "Please log in to save settings.",
+        variant: "destructive"
+      });
+      return false;
+    }
+
     try {
+      setLoading(true);
       const updatedSettings = { ...settings, ...newSettings };
-      setSettings(updatedSettings);
-      localStorage.setItem('feedbackSettings', JSON.stringify(updatedSettings));
       
-      console.log('Saved settings:', updatedSettings);
+      const { data, error } = await supabase
+        .from('user_settings')
+        .upsert({
+          admin_user_id: userId,
+          google_form_url: updatedSettings.googleFormUrl,
+          spreadsheet_id: updatedSettings.spreadsheetId,
+          api_key: updatedSettings.apiKey,
+          form_name: updatedSettings.formName,
+          sheet_range: updatedSettings.sheetRange,
+          auto_refresh: updatedSettings.autoRefresh,
+          refresh_interval: updatedSettings.refreshInterval,
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving settings:', error);
+        toast({
+          title: "Error",
+          description: "Failed to save settings to database.",
+          variant: "destructive"
+        });
+        return false;
+      }
+
+      setSettings(updatedSettings);
+      console.log('Saved settings to Supabase:', updatedSettings);
       
       toast({
         title: "Settings Saved",
@@ -150,6 +230,8 @@ export const useFeedback = () => {
         variant: "destructive"
       });
       return false;
+    } finally {
+      setLoading(false);
     }
   }, [settings, toast]);
 
@@ -434,10 +516,28 @@ export const useFeedback = () => {
     setError(null);
   }, []);
 
-  // Reset to defaults
-  const resetSettings = useCallback(() => {
+  // Reset to defaults and delete from database
+  const resetSettings = useCallback(async () => {
+    const userId = getCurrentUserId();
+    
+    if (userId) {
+      try {
+        const { error } = await supabase
+          .from('user_settings')
+          .delete()
+          .eq('admin_user_id', userId);
+
+        if (error) {
+          console.error('Error deleting settings from Supabase:', error);
+        } else {
+          console.log('Settings deleted from Supabase');
+        }
+      } catch (error) {
+        console.error('Error resetting settings:', error);
+      }
+    }
+
     setSettings(defaultSettings);
-    localStorage.removeItem('feedbackSettings');
     setAvailableSheets([]);
     setIsConfigured(false);
     toast({
