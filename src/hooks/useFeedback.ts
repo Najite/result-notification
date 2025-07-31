@@ -8,9 +8,6 @@ import type { Database } from './types';
 const SUPABASE_URL = "https://ojmiubjjnvswaoprueio.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9qbWl1YmpqbnZzd2FvcHJ1ZWlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAwMTQyODcsImV4cCI6MjA2NTU5MDI4N30.4djPgHjQsvOIIqw4AWwxHQR6t_PG3NhbVDuojpJqQDQ";
 
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
-
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
 // Mock data for demonstration
@@ -98,17 +95,14 @@ const defaultSettings: FeedbackSettings = {
   refreshInterval: 5
 };
 
-// Generate a unique session ID for this browser session
+// Generate a unique session ID - using in-memory storage instead of localStorage
+let sessionId: string | null = null;
+
 const getSessionId = () => {
-  if (typeof window !== 'undefined') {
-    let sessionId = localStorage.getItem('feedback_session_id');
-    if (!sessionId) {
-      sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-      localStorage.setItem('feedback_session_id', sessionId);
-    }
-    return sessionId;
+  if (!sessionId) {
+    sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
   }
-  return 'default_session';
+  return sessionId;
 };
 
 export const useFeedback = () => {
@@ -138,7 +132,7 @@ export const useFeedback = () => {
 
   // Load settings from Supabase using session ID
   const loadSettings = useCallback(async () => {
-    const sessionId = getSessionId();
+    const currentSessionId = getSessionId();
 
     try {
       setLoading(true);
@@ -146,11 +140,16 @@ export const useFeedback = () => {
       const { data, error } = await supabase
         .from('user_settings')
         .select('*')
-        .eq('admin_user_id', sessionId)
+        .eq('admin_user_id', currentSessionId)
         .single();
 
       if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
         console.error('Error loading settings:', error);
+        toast({
+          title: "Database Error",
+          description: `Failed to load settings: ${error.message}`,
+          variant: "destructive"
+        });
         return;
       }
 
@@ -170,48 +169,82 @@ export const useFeedback = () => {
       }
     } catch (error) {
       console.error('Error loading feedback settings:', error);
+      toast({
+        title: "Connection Error",
+        description: "Failed to connect to database. Using default settings.",
+        variant: "destructive"
+      });
       setSettings(defaultSettings);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   // Save settings to Supabase using session ID
   const saveSettings = useCallback(async (newSettings: Partial<FeedbackSettings>) => {
-    const sessionId = getSessionId();
+    const currentSessionId = getSessionId();
 
     try {
       setLoading(true);
       const updatedSettings = { ...settings, ...newSettings };
       
+      // Validate required fields before saving
+      if (!updatedSettings.spreadsheetId?.trim()) {
+        toast({
+          title: "Validation Error",
+          description: "Spreadsheet ID is required.",
+          variant: "destructive"
+        });
+        return false;
+      }
+
+      const settingsToSave = {
+        admin_user_id: currentSessionId,
+        google_form_url: updatedSettings.googleFormUrl?.trim() || null,
+        spreadsheet_id: updatedSettings.spreadsheetId?.trim() || null,
+        api_key: updatedSettings.apiKey?.trim() || null,
+        form_name: updatedSettings.formName?.trim() || null,
+        sheet_range: updatedSettings.sheetRange?.trim() || 'Form Responses 1!A:G',
+        auto_refresh: updatedSettings.autoRefresh || false,
+        refresh_interval: updatedSettings.refreshInterval || 5,
+        updated_at: new Date().toISOString()
+      };
+
+      console.log('Attempting to save settings:', settingsToSave);
+
       const { data, error } = await supabase
         .from('user_settings')
-        .upsert({
-          admin_user_id: sessionId,
-          google_form_url: updatedSettings.googleFormUrl,
-          spreadsheet_id: updatedSettings.spreadsheetId,
-          api_key: updatedSettings.apiKey,
-          form_name: updatedSettings.formName,
-          sheet_range: updatedSettings.sheetRange,
-          auto_refresh: updatedSettings.autoRefresh,
-          refresh_interval: updatedSettings.refreshInterval,
-          updated_at: new Date().toISOString()
+        .upsert(settingsToSave, {
+          onConflict: 'admin_user_id'
         })
         .select()
         .single();
 
       if (error) {
-        console.error('Error saving settings:', error);
+        console.error('Supabase error details:', error);
+        
+        // More specific error handling
+        let errorMessage = "Failed to save settings to database.";
+        if (error.code === '23505') {
+          errorMessage = "Duplicate entry error. Please try again.";
+        } else if (error.code === '42501') {
+          errorMessage = "Permission denied. Please check your database permissions.";
+        } else if (error.code === '42P01') {
+          errorMessage = "Table not found. Please check your database schema.";
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+
         toast({
-          title: "Error",
-          description: "Failed to save settings to database.",
+          title: "Database Error",
+          description: errorMessage,
           variant: "destructive"
         });
         return false;
       }
 
       setSettings(updatedSettings);
-      console.log('Saved settings to Supabase:', updatedSettings);
+      console.log('Successfully saved settings to Supabase:', data);
       
       toast({
         title: "Settings Saved",
@@ -221,9 +254,15 @@ export const useFeedback = () => {
       return true;
     } catch (error) {
       console.error('Error saving feedback settings:', error);
+      
+      let errorMessage = "Failed to save settings.";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      
       toast({
         title: "Error",
-        description: "Failed to save settings.",
+        description: errorMessage,
         variant: "destructive"
       });
       return false;
@@ -515,16 +554,21 @@ export const useFeedback = () => {
 
   // Reset to defaults and delete from database
   const resetSettings = useCallback(async () => {
-    const sessionId = getSessionId();
+    const currentSessionId = getSessionId();
     
     try {
       const { error } = await supabase
         .from('user_settings')
         .delete()
-        .eq('admin_user_id', sessionId);
+        .eq('admin_user_id', currentSessionId);
 
       if (error) {
         console.error('Error deleting settings from Supabase:', error);
+        toast({
+          title: "Reset Warning",
+          description: "Settings reset locally, but database cleanup failed.",
+          variant: "destructive"
+        });
       } else {
         console.log('Settings deleted from Supabase');
       }
