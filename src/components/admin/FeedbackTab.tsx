@@ -381,7 +381,7 @@ const FeedbackTab: React.FC = () => {
                   onChange={(e) => setFilterCategory(e.target.value)}
                   className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="all">All Categories</option>
+                  <option value="all">All Matric number</option>
                   {categories.map(category => (
                     <option key={category} value={category}>{category}</option>
                   ))}
@@ -501,7 +501,7 @@ const FeedbackTab: React.FC = () => {
             {/* Category Breakdown */}
             <Card>
               <CardHeader>
-                <CardTitle>Feedback by Category</CardTitle>
+                <CardTitle>Feedback by Matric Number</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
